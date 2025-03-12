@@ -380,4 +380,703 @@
         const trainingFileInput = document.getElementById('trainingFile');
         const trainingFileListDiv = document.getElementById('trainingFileList');
         const processingStatusDiv = document.getElementById('processingStatus');
-        const processTrainingButton = document.getElementById('process
+        const processTrainingButton = document.getElementById('processTraining');
+        const trainingResultDiv = document.getElementById('trainingResult');
+
+        const buildModelButton = document.getElementById('buildModel');
+        const modelResultDiv = document.getElementById('modelResult');
+        const modelInfoDiv = document.getElementById('modelInfo');
+        const modelProgressContainer = document.getElementById('modelProgressContainer');
+        const modelProgressBar = document.getElementById('modelProgressBar');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const epochsInput = document.getElementById('epochs');
+        const batchSizeInput = document.getElementById('batchSize');
+        const hiddenUnits1Input = document.getElementById('hiddenUnits1');
+        const hiddenUnits2Input = document.getElementById('hiddenUnits2');
+        const activationSelect = document.getElementById('activation');
+
+        const testFileInput = document.getElementById('testFile');
+        const processTestButton = document.getElementById('processTest');
+        const testResultDiv = document.getElementById('testResult');
+
+        const playAnimationButton = document.getElementById('playAnimation');
+        const pauseAnimationButton = document.getElementById('pauseAnimation');
+        const resetAnimationButton = document.getElementById('resetAnimation');
+        const angleInfoDiv = document.getElementById('angleInfo');
+
+
+        // イベントリスナー
+        processCalibrationButton.addEventListener('click', processCalibrationData);
+        processTrainingButton.addEventListener('click', processTrainingData);
+        buildModelButton.addEventListener('click', buildNeuralNetworkModel);
+        processTestButton.addEventListener('click', processTestData);
+        playAnimationButton.addEventListener('click', playAnimation);
+        pauseAnimationButton.addEventListener('click', pauseAnimation);
+        resetAnimationButton.addEventListener('click', resetAnimation);
+
+        // ファイルが選択されたときの処理 (trainingFile)
+        trainingFileInput.addEventListener('change', () => {
+            trainingFiles = Array.from(trainingFileInput.files);
+            totalFileCount = trainingFiles.length;
+            processedFileCount = 0; // カウンターをリセット
+            processingStatusDiv.textContent = ''; // ステータスをクリア
+
+            if (trainingFiles.length > 0) {
+                trainingFileListDiv.style.display = 'block';
+                trainingFileListDiv.innerHTML = ''; // リストをクリア
+
+                trainingFiles.forEach((file, index) => {
+                    const listItem = document.createElement('div');
+                    listItem.classList.add('file-list-item');
+                    listItem.innerHTML = `
+                        <span>${file.name}</span>
+                        <button class="remove-file" data-index="${index}">削除</button>
+                    `;
+                    trainingFileListDiv.appendChild(listItem);
+                });
+
+                // 削除ボタンのイベントリスナー
+                trainingFileListDiv.querySelectorAll('.remove-file').forEach(button => {
+                    button.addEventListener('click', (event) => {
+                        const indexToRemove = parseInt(event.target.dataset.index);
+                        trainingFiles.splice(indexToRemove, 1); // 配列から削除
+                        totalFileCount = trainingFiles.length;
+                        // リストを再描画
+                        trainingFileListDiv.innerHTML = '';
+                        trainingFiles.forEach((file, index) => {
+                            const listItem = document.createElement('div');
+                            listItem.classList.add('file-list-item');
+                            listItem.innerHTML = `
+                                <span>${file.name}</span>
+                                <button class="remove-file" data-index="${index}">削除</button>
+                            `;
+                            trainingFileListDiv.appendChild(listItem);
+                        });
+                        if(trainingFiles.length === 0){
+                            trainingFileListDiv.style.display = 'none';
+                            processTrainingButton.disabled = true;
+                        }
+                    });
+                });
+              processTrainingButton.disabled = false;
+            } else {
+                trainingFileListDiv.style.display = 'none';
+                processTrainingButton.disabled = true;
+            }
+        });
+
+        // キャリブレーションデータの処理
+        function processCalibrationData() {
+          const file = calibrationFileInput.files[0];
+          if (!file) {
+            showAlert(calibrationResultDiv, 'ファイルを選択してください。', 'alert-warning');
+            return;
+          }
+
+          Papa.parse(file, {
+            header: true,
+            dynamicTyping: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+              if (results.errors.length > 0) {
+                results.errors.forEach(error => {
+                    console.error('Parsing error:', error.code, error.message, error.row);
+                    if (error.code === "TooFewFields" || error.code === "TooManyFields") {
+                        showAlert(calibrationResultDiv, `CSVファイルの解析中にエラーが発生しました。行${error.row + 1}のカラム数が不正です。期待されるカラム数: ${calibrationExpectedColumns}`, 'alert-danger');
+                    } else {
+                        showAlert(calibrationResultDiv, 'CSVファイルの解析中にエラーが発生しました。', 'alert-danger');
+                    }
+                });
+                return;
+              }
+
+              let fileCalibrationData = results.data;
+
+              // 必要なカラムが存在するか確認
+              const requiredColumns = ["Timestamp", "Power", ...muscleChannels];
+              const missingColumns = requiredColumns.filter(col => !(col in fileCalibrationData[0]));
+
+              if (missingColumns.length > 0) {
+                showAlert(calibrationResultDiv, `必要なカラムがありません: ${missingColumns.join(', ')}`, 'alert-warning');
+                return;
+              }
+
+              // 詳細なデータチェック
+              const validData = fileCalibrationData.filter((row, rowIndex) => {
+                const isValidRow = requiredColumns.every(col => {
+                    if (row[col] === null || row[col] === undefined) {
+                        console.error(`Row ${rowIndex + 2}: Column '${col}' is missing.`);
+                        return false;
+                    }
+                    if (col !== "Timestamp") {
+                      if(isNaN(row[col])){
+                        console.error(`Row ${rowIndex + 2}: Column '${col}' is not a number.`);
+                        return false
+                      }
+                    }
+                    return true;
+                });
+
+                if (!isValidRow) {
+                    showAlert(calibrationResultDiv, `CSVファイルの${rowIndex + 2}行目に不正なデータがあります。`, 'alert-warning');
+                }
+                return isValidRow;
+              });
+
+              calibrationData = validData;
+
+              if (calibrationData.length === 0) {
+                showAlert(calibrationResultDiv, '有効なデータがありません。', 'alert-warning');
+                return;
+              }
+
+              muscleMeans = {};
+              muscleChannels.forEach(ch => {
+                const values = calibrationData.map(row => row[ch]);
+                muscleMeans[ch] = values.reduce((sum, value) => sum + value, 0) / values.length;
+              });
+
+              // 結果の表示
+              let resultHTML = '<h3>キャリブレーション結果</h3>';
+              resultHTML += '<p>各チャネルの平均値（安静時）:</p>';
+              resultHTML += '<table><tr><th>チャネル</th><th>平均値</th></tr>';
+              muscleChannels.forEach(ch => {
+                resultHTML += `<tr><td>${ch}</td><td>${muscleMeans[ch].toFixed(2)}</td></tr>`;
+              });
+              resultHTML += '</table>';
+
+              showAlert(calibrationResultDiv, resultHTML, 'alert-success');
+              // processTrainingButton.disabled = false; // ここでは有効化しない
+            }
+          });
+        }
+
+        // トレーニングデータの処理 (複数ファイル対応)
+        function processTrainingData() {
+
+            if (!muscleMeans || Object.keys(muscleMeans).length === 0) {
+                showAlert(trainingResultDiv, 'キャリブレーションデータを先に処理してください。', 'alert-warning');
+                return;
+            }
+
+            processedTrainingData = []; // 結果をリセット
+            processedFileCount = 0; // カウントをリセット
+            processingStatusDiv.textContent = `0 / ${totalFileCount} ファイル処理済み`;
+
+            trainingFiles.forEach(file => {
+                Papa.parse(file, {
+                    header: true,
+                    dynamicTyping: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        if (results.errors.length > 0) {
+                            showAlert(trainingResultDiv, `CSVファイルの解析中にエラーが発生しました。: ${results.errors[0].message}`, 'alert-danger');
+                            console.error('Parsing errors:', results.errors);
+                            return;
+                        }
+
+                        let fileTrainingData = results.data;
+
+                        // 必要なカラムが存在するか確認
+                        const requiredColumns = [...muscleChannels, ...angleColumns, ...positionColumns];
+                        const missingColumns = requiredColumns.filter(col => !(col in fileTrainingData[0]));
+
+                        if (missingColumns.length > 0) {
+                            showAlert(trainingResultDiv, `必要なカラムがありません: ${missingColumns.join(', ')}`, 'alert-warning');
+                            return;
+                        }
+                        // 詳細なデータチェック
+                       const validData = fileTrainingData.filter((row, rowIndex) => {
+                          const isValidRow = requiredColumns.every(col => {
+                            if (row[col] === null || row[col] === undefined) {
+                              console.error(`Row ${rowIndex + 2}: Column '${col}' is missing.`);
+                              return false;
+                          }
+                            if(muscleChannels.includes(col) || angleColumns.includes(col) || positionColumns.includes(col)){
+                                if (isNaN(row[col])) {
+                                    console.error(`Row ${rowIndex + 2}: Column '${col}' is not a number.`);
+                                    return false;
+                                }
+                            }
+
+                            return true;
+                        });
+
+                        if (!isValidRow) {
+                            showAlert(trainingResultDiv, `CSVファイルの${rowIndex + 2}行目に不正なデータがあります。`, 'alert-warning');
+                        }
+                        return isValidRow;
+                    });
+
+                        // 前処理
+                        const fileProcessedTrainingData = validData.map(row => {
+                            const processedRow = {...row};
+                            muscleChannels.forEach(ch => {
+                                processedRow[ch] = row[ch] - muscleMeans[ch];
+                            });
+                            return processedRow;
+                        });
+
+                        processedTrainingData = processedTrainingData.concat(fileProcessedTrainingData);
+
+                        // 処理済みファイル数の更新と表示
+                        processedFileCount++;
+                        processingStatusDiv.textContent = `${processedFileCount} / ${totalFileCount} ファイル処理済み`;
+
+                        if(processedFileCount === totalFileCount){
+                            if (processedTrainingData.length > 0) {
+                                const resultHTML = `
+                                    <h3>トレーニングデータ前処理結果</h3>
+                                    <p>処理されたデータポイント数: ${processedTrainingData.length}</p>
+                                    <p>前処理方法: 各チャネルから安静時の平均値を引きました</p>
+                                `;
+                                showAlert(trainingResultDiv, resultHTML, 'alert-success');
+                                buildModelButton.disabled = false;
+                            }
+                        }
+                    },
+                    error: function(error) {
+                        console.error("Error:", error);
+                        showAlert(trainingResultDiv, `CSVファイルの読み込み中にエラーが発生しました: ${error.message}`, 'alert-danger');
+                    }
+                });
+            });
+        }
+
+
+        // モデル構築
+        function buildNeuralNetworkModel() {
+            if (!processedTrainingData || processedTrainingData.length === 0) {
+                showAlert(modelResultDiv, 'トレーニングデータを先に処理してください。', 'alert-warning');
+                return;
+            }
+
+            showAlert(modelResultDiv, 'モデルを構築中...', 'alert-info');
+            loadingIndicator.style.display = 'block';
+            modelProgressContainer.style.display = 'block';
+            buildModelButton.disabled = true;
+
+            const inputData = processedTrainingData.map(row => muscleChannels.map(ch => row[ch]));
+            const outputData = processedTrainingData.map(row => angleColumns.map(col => row[col]));
+
+            const options = {
+                task: 'regression',
+                layers: [
+                    {
+                        type: 'dense',
+                        units: parseInt(hiddenUnits1Input.value),
+                        activation: activationSelect.value
+                    },
+                    {
+                        type: 'dense',
+                        units: parseInt(hiddenUnits2Input.value),
+                        activation: activationSelect.value
+                    }
+                ],
+                debug: true
+            };
+
+            neuralNetwork = ml5.neuralNetwork(options);
+
+            for (let i = 0; i < inputData.length; i++) {
+                neuralNetwork.addData(inputData[i], outputData[i]);
+            }
+
+            neuralNetwork.normalizeData();
+
+            const trainingOptions = {
+                epochs: parseInt(epochsInput.value),
+                batchSize: parseInt(batchSizeInput.value)
+            };
+
+            neuralNetwork.train(trainingOptions, whileTraining, finishedTraining);
+
+            function whileTraining(epoch, loss) {
+                console.log(`Epoch: ${epoch}, Loss: ${loss.loss}`);
+                const progress = Math.round((epoch / trainingOptions.epochs) * 100);
+                modelProgressBar.style.width = `${progress}%`;
+                modelProgressBar.textContent = `${progress}%`;
+                modelInfoDiv.innerHTML = `エポック: ${epoch}/${trainingOptions.epochs}, 損失: ${loss.loss.toFixed(4)}`;
+            }
+
+            function finishedTraining() {
+                loadingIndicator.style.display = 'none';
+                showAlert(modelResultDiv, 'モデルのトレーニングが完了しました！', 'alert-success');
+                modelInfoDiv.innerHTML += '<br>モデルの構築が完了しました。テストデータを処理できます。';
+                processTestButton.disabled = false;
+            }
+        }
+
+        // テストデータの処理
+        function processTestData() {
+            const file = testFileInput.files[0];
+            if (!file) {
+                showAlert(testResultDiv, 'ファイルを選択してください。', 'alert-warning');
+                return;
+            }
+
+            if (!neuralNetwork) {
+                showAlert(testResultDiv, 'モデルを先に構築してください。', 'alert-warning');
+                return;
+            }
+
+            Papa.parse(file, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.errors.length > 0) {
+                        results.errors.forEach(error => {
+                            console.error('Parsing error:', error.code, error.message, error.row);
+                            if (error.code === "TooFewFields" || error.code === "TooManyFields") {
+                                showAlert(testResultDiv, `CSVファイルの解析中にエラーが発生しました。行${error.row + 1}のカラム数が不正です。期待されるカラム数: ${calibrationExpectedColumns}`, 'alert-danger');
+                            } else {
+                                showAlert(testResultDiv, 'CSVファイルの解析中にエラーが発生しました。', 'alert-danger');
+                            }
+                        });
+                        return;
+                    }
+
+                  let fileTestData = results.data;
+
+                  // 必要なカラムが存在するか確認
+                  const requiredColumns = ["Timestamp", "Power", ...muscleChannels];
+                  const missingColumns = requiredColumns.filter(col => !(col in fileTestData[0]));
+                  if (missingColumns.length > 0) {
+                    showAlert(testResultDiv, `必要なカラムがありません: ${missingColumns.join(', ')}`, 'alert-warning');
+                    return;
+                  }
+
+                  //詳細なデータチェック
+                  const validData = fileTestData.filter((row, rowIndex) => {
+                    const isValidRow = requiredColumns.every(col => {
+                        if (row[col] === null || row[col] === undefined) {
+                            console.error(`Row ${rowIndex + 2}: Column '${col}' is missing.`);
+                            return false;
+                        }
+                        if (col !== "Timestamp") {
+                          if(isNaN(row[col])){
+                            console.error(`Row ${rowIndex + 2}: Column '${col}' is not a number.`);
+                            return false
+                          }
+                        }
+                        return true;
+                    });
+
+                    if (!isValidRow) {
+                        showAlert(testResultDiv, `CSVファイルの${rowIndex + 2}行目に不正なデータがあります。`, 'alert-warning');
+                    }
+                    return isValidRow;
+                  });
+
+                  testData = validData;
+
+                    if (testData.length === 0) {
+                        showAlert(testResultDiv, '有効なデータがありません。', 'alert-warning');
+                        return;
+                    }
+
+                    // 前処理
+                    processedTestData = testData.map(row => {
+                        const processedRow = {...row};
+                        muscleChannels.forEach(ch => {
+                            processedRow[ch] = row[ch] - muscleMeans[ch];  // キャリブレーションデータから計算した平均値を引く
+                        });
+                        return processedRow;
+                    });
+
+                    // モデルを使用して予測
+                    predictions = [];
+                    let predictionsCompleted = 0;
+
+                    processedTestData.forEach((row, index) => {
+                        const input = muscleChannels.map(ch => row[ch]);
+                        neuralNetwork.predict(input, (error, results) => {
+                            if (error) {
+                                console.error('予測エラー:', error);
+                                return;
+                            }
+
+                            predictions[index] = {
+                                elbow_angle: results[0].value,
+                                wrist_angle: results[1].value,
+                                shoulder_angle: results[2].value
+                            };
+
+                            predictionsCompleted++;
+
+                            if (predictionsCompleted === processedTestData.length) {
+                                showAlert(testResultDiv, `${predictionsCompleted}フレームの腕の角度予測が完了しました。`, 'alert-success');
+                                initializeAnimation();
+                                playAnimationButton.disabled = false;
+                                resetAnimationButton.disabled = false;
+                            }
+                        });
+                    });
+                }
+            });
+        }
+
+        // 以降、アニメーションと可視化の関数は変更なし
+        function initializeAnimation() {
+            // p5.jsのスケッチを作成
+            new p5(function(p) {
+                p.setup = function() {
+                    const canvas = p.createCanvas(600, 400);
+                    canvas.parent('animationContainer');
+                    p.angleMode(p.DEGREES);
+                    p.stroke(0);
+                    p.strokeWeight(4);
+                    p.noLoop();
+                };
+
+                p.draw = function() {
+                    p.background(240);
+
+                    if (predictions.length === 0 || currentFrame >= predictions.length) {
+                        return;
+                    }
+
+                    const prediction = predictions[currentFrame];
+
+                    // 角度情報を表示
+                    angleInfoDiv.innerHTML = `
+                        <p>フレーム: ${currentFrame + 1}/${predictions.length}</p>
+                        <p>肘の角度: ${prediction.elbow_angle.toFixed(2)}°</p>
+                        <p>手首の角度: ${prediction.wrist_angle.toFixed(2)}°</p>
+                        <p>肩の角度: ${prediction.shoulder_angle.toFixed(2)}°</p>
+                    `;
+
+                    // 腕のアニメーション
+                    const shoulderX = 150;
+                    const shoulderY = 200;
+                    const upperArmLength = 100;
+                    const forearmLength = 100;
+                    const handLength = 50;
+
+                    // 肩の角度から上腕の位置を計算
+                    const shoulderAngle = prediction.shoulder_angle;
+                    const elbowX = shoulderX + p.cos(shoulderAngle) * upperArmLength;
+                    const elbowY = shoulderY - p.sin(shoulderAngle) * upperArmLength;
+
+                    // 肘の角度から前腕の位置を計算
+                    const elbowAngle = prediction.elbow_angle;
+                    const wristX = elbowX + p.cos(shoulderAngle - elbowAngle) * forearmLength;
+                    const wristY = elbowY - p.sin(shoulderAngle - elbowAngle) * forearmLength;
+
+                    // 手首の角度から手の位置を計算
+                    const wristAngle = prediction.wrist_angle;
+                    const handX = wristX + p.cos(shoulderAngle - elbowAngle - wristAngle) * handLength;
+                    const handY = wristY - p.sin(shoulderAngle - elbowAngle - wristAngle) * handLength;
+
+                    // 腕を描画
+                    p.stroke(0);
+                    p.strokeWeight(8);
+                    p.line(shoulderX, shoulderY, elbowX, elbowY); // 上腕
+                    p.stroke(60, 120, 216);
+                    p.line(elbowX, elbowY, wristX, wristY); // 前腕
+                    p.stroke(216, 60, 60);
+                    p.line(wristX, wristY, handX, handY); // 手
+
+                    // 関節を描画
+                    p.fill(30);
+                    p.noStroke();
+                    p.ellipse(shoulderX, shoulderY, 15, 15); // 肩
+                    p.ellipse(elbowX, elbowY, 12, 12); // 肘
+                    p.ellipse(wristX, wristY, 10, 10); // 手首
+
+                    // ダーツを描画
+                    if (prediction.elbow_angle < 90) { // ダーツを投げる動作と判断
+                        p.fill(0, 100, 0);
+                        p.ellipse(handX, handY, 10, 10);
+
+                        // ダーツの飛んでいく軌道を点線で表示
+                        p.stroke(0, 100, 0, 150);
+                        p.strokeWeight(1);
+                        p.drawingContext.setLineDash([5, 5]);
+                        const targetX = 500;
+                        const targetY = 200;
+                        p.line(handX, handY, targetX, targetY);
+                        p.drawingContext.setLineDash([]);
+
+                        // ダーツのターゲットを描画
+                        p.noStroke();
+                        p.fill(100, 0, 0);
+                        p.ellipse(targetX, targetY, 40, 40);
+                        p.fill(255);
+                        p.ellipse(targetX, targetY, 25, 25);
+                        p.fill(100, 0, 0);
+                        p.ellipse(targetX, targetY, 10, 10);
+                    }
+                };
+
+                p.updateWithData = function() {
+                    if (predictions.length > 0) {
+                        p.redraw();
+                    }
+                };
+
+            }, 'animationContainer');
+        }
+
+        // アニメーションの再生
+        function playAnimation() {
+            if (isPlaying) return;
+
+            isPlaying = true;
+            playAnimationButton.disabled = true;
+            pauseAnimationButton.disabled = false;
+
+            function animate() {
+                if (!isPlaying) return;
+
+                if (currentFrame < predictions.length - 1) {
+                    currentFrame++;
+                    animationFrameId = setTimeout(animate, animationSpeed);
+                } else {
+                    // 最後のフレームで停止
+                    isPlaying = false;
+                    playAnimationButton.disabled = false;
+                    pauseAnimationButton.disabled = true;
+                }
+                // p5.jsの描画関数を更新
+                if (window.p5 && window.p5.prototype.updateWithData) {
+                  window.p5.prototype.updateWithData();
+                }
+            }
+
+            animate();
+        }
+
+        // アニメーションの一時停止
+        function pauseAnimation() {
+            isPlaying = false;
+            playAnimationButton.disabled = false;
+            pauseAnimationButton.disabled = true;
+            clearTimeout(animationFrameId);
+        }
+
+        // アニメーションのリセット
+        function resetAnimation() {
+            isPlaying = false;
+            currentFrame = 0;
+            playAnimationButton.disabled = false;
+            pauseAnimationButton.disabled = true;
+            clearTimeout(animationFrameId);
+
+            // p5.jsの描画関数を更新
+             if (window.p5 && window.p5.prototype.updateWithData) {
+                window.p5.prototype.updateWithData();
+             }
+            angleInfoDiv.innerHTML = ''; // 角度情報をクリア
+        }
+          // データ可視化 (Chart.jsを使用)
+
+        function visualizeData() {
+             if (!processedTestData || processedTestData.length === 0) {
+                return;
+            }
+            // 筋変位データの可視化
+            const muscleDataCtx = document.getElementById('muscleDataChart').getContext('2d');
+             const muscleDataChart = new Chart(muscleDataCtx, {
+                type: 'line',
+                data: {
+                    labels: processedTestData.map((_, index) => index + 1), // フレーム番号
+                    datasets: muscleChannels.map(ch => ({
+                        label: ch,
+                        data: processedTestData.map(row => row[ch]),
+                        borderColor: getRandomColor(),
+                        fill: false,
+                        borderWidth: 1,
+                        pointRadius: 0
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Frame'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Muscle Displacement'
+                            }
+                        }
+                    }
+                }
+            });
+
+           // 角度データの可視化
+            const angleDataCtx = document.getElementById('angleDataChart').getContext('2d');
+            const angleDataChart = new Chart(angleDataCtx, {
+                type: 'line',
+                data: {
+                    labels: predictions.map((_, index) => index + 1),
+                    datasets: angleColumns.map(col => ({
+                        label: col,
+                        data: predictions.map(p => p[col]),
+                        borderColor: getRandomColor(),
+                        fill: false,
+                         borderWidth: 2,
+                        pointRadius: 1
+                    }))
+                 },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                     scales: {
+                        x: {
+                             title: {
+                                 display: true,
+                                text: 'Frame'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Angle (degrees)'
+                            }
+                        }
+                    }
+                 }
+             });
+        }
+
+        // ランダムな色を生成する関数
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+
+        // アラートを表示する関数
+        function showAlert(element, message, type) {
+            element.innerHTML = message;
+            element.className = `alert ${type}`;
+            element.style.display = 'block';
+        }
+
+        // データ可視化の呼び出し (予測後)
+        processTestButton.addEventListener('click', () => {
+          // ... (他の処理)
+          // 予測が完了した後に可視化関数を呼び出す
+            const checkPredictionsInterval = setInterval(() => {
+              if (predictions.length > 0 && predictions.length === processedTestData.length){
+                visualizeData();
+                clearInterval(checkPredictionsInterval);
+              }
+            }, 500); //500ミリ秒ごとに予測が完了しているか確認
+
+        });
+    </script>
+</body>
+</html>
