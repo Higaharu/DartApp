@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ダーツ動作再現アプリ</title>
+    <link rel="stylesheet" href="style.css"> </head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- TensorFlow.js を ml5.js より前に読み込む -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<body>
+    <div class="container">
+        <h1>ダーツ動作再現アプリ</h1>
+
+        <!-- (HTMLの内容は、以前のコードの<body>内の<div class="container">から</div>までをそのまま) -->
+         <div class="section">
+            <h2>1. キャリブレーションデータのアップロード</h2>
+            <p>安静時の筋変位データをアップロードしてください。</p>
+            <div class="file-input">
+                <label for="calibrationFile">キャリブレーションファイル:</label>
+                <input type="file" id="calibrationFile" accept=".csv">
+            </div>
+            <button id="processCalibration">キャリブレーションデータを処理</button>
+            <div id="calibrationResult" class="alert alert-info" style="display: none;"></div>
+        </div>
+
+        <div class="section">
+            <h2>2. トレーニングデータのアップロード</h2>
+            <p>筋変位データと腕の角度データを含むトレーニングファイルをアップロードしてください。</p>
+            <div class="file-input">
+                <label for="trainingFile">トレーニングファイル（複数選択可）:</label>
+                <input type="file" id="trainingFile" accept=".csv" multiple>
+            </div>
+            <div id="trainingFileList" class="file-list" style="display: none;"></div>
+            <div class="processing-status" id="processingStatus"></div>
+            <button id="processTraining" disabled>トレーニングデータを処理</button>
+            <div id="trainingResult" class="alert alert-info" style="display: none;"></div>
+        </div>
+
+        <div class="section">
+            <h2>3. モデルの構築</h2>
+            <p>前処理されたデータを使用してモデルを構築します。</p>
+            
+            <div class="model-options">
+                <h3>モデルオプション</h3>
+                <div class="form-group">
+                    <label for="epochs">エポック数:</label>
+                    <input type="number" id="epochs" min="10" max="500" value="50">
+                </div>
+                <div class="form-group">
+                    <label for="batchSize">バッチサイズ:</label>
+                    <input type="number" id="batchSize" min="8" max="128" value="32">
+                </div>
+                <div class="form-group">
+                    <label for="hiddenUnits1">隠れ層1のユニット数:</label>
+                    <input type="number" id="hiddenUnits1" min="8" max="64" value="32">
+                </div>
+                <div class="form-group">
+                    <label for="hiddenUnits2">隠れ層2のユニット数:</label>
+                    <input type="number" id="hiddenUnits2" min="8" max="64" value="16">
+                </div>
+                <div class="form-group">
+                    <label for="activation">活性化関数:</label>
+                    <select id="activation">
+                        <option value="relu">ReLU</option>
+                        <option value="sigmoid">Sigmoid</option>
+                        <option value="tanh">Tanh</option>
+                    </select>
+                </div>
+            </div>
+            
+            <button id="buildModel" disabled>モデルを構築</button>
+            <div id="loadingIndicator">
+                <div class="spinner"></div>
+                <p>モデル構築中...</p>
+            </div>
+            <div id="modelResult" class="alert alert-info" style="display: none;"></div>
+            <div class="progress-container" id="modelProgressContainer" style="display: none;">
+                <div class="progress-bar" id="modelProgressBar">0%</div>
+            </div>
+            <div id="modelInfo"></div>
+        </div>
+
+        <div class="section">
+            <h2>4. テストデータのアップロード</h2>
+            <p>予測したい筋変位データをアップロードしてください。</p>
+            <div class="file-input">
+                <label for="testFile">テストファイル:</label>
+                <input type="file" id="testFile" accept=".csv">
+            </div>
+            <button id="processTest" disabled>テストデータを処理</button>
+            <div id="testResult" class="alert alert-info" style="display: none;"></div>
+        </div>
+
+        <div class="section">
+            <h2>5. 動きの再現</h2>
+            <p>予測された腕の動きのアニメーション：</p>
+            <div class="canvas-container" id="animationContainer"></div>
+            <div class="controls">
+                <button id="playAnimation" disabled>再生</button>
+                <button id="pauseAnimation" disabled>一時停止</button>
+                <button id="resetAnimation" disabled>リセット</button>
+            </div>
+            <div id="angleInfo"></div>
+        </div>
+
+        <div class="section">
+            <h2>6. データ可視化</h2>
+            <div class="visualization">
+                <div>
+                    <h3>筋変位データグラフ</h3>
+                    <div class="chart-container" id="muscleDataChart"></div>
+                </div>
+                <div>
+                    <h3>角度データグラフ</h3>
+                    <div class="chart-container" id="angleDataChart"></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
