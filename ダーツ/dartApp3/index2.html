@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ダーツ動作再現アプリ</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/ml5/0.12.2/ml5.min.js"></script>
+    <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -656,41 +656,52 @@
             modelProgressContainer.style.display = 'block';
             buildModelButton.disabled = true;
 
-            const inputData = processedTrainingData.map(row => muscleChannels.map(ch => row[ch]));
-            const outputData = processedTrainingData.map(row => angleColumns.map(col => row[col]));
+            // 入力（筋肉データ）と出力（角度データ）を準備
+            const inputData = processedTrainingData.map(row => {
+                // 筋肉データを配列として取得
+                return muscleChannels.map(ch => parseFloat(row[ch]));
+            });
+            
+            const outputData = processedTrainingData.map(row => {
+                // 角度データを配列として取得
+                return angleColumns.map(col => parseFloat(row[col]));
+            });
 
+            // モデルのオプションを設定
             const options = {
                 task: 'regression',
-                layers: [
-                    {
-                        type: 'dense',
-                        units: parseInt(hiddenUnits1Input.value),
-                        activation: activationSelect.value
-                    },
-                    {
-                        type: 'dense',
-                        units: parseInt(hiddenUnits2Input.value),
-                        activation: activationSelect.value
-                    }
-                ],
+                inputs: muscleChannels.length, // 入力の次元数（筋肉チャネル数）
+                outputs: angleColumns.length,  // 出力の次元数（角度の種類）
                 debug: true
             };
 
+            // ニューラルネットワークを初期化
             neuralNetwork = ml5.neuralNetwork(options);
 
+            console.log(`Adding ${inputData.length} training examples...`);
+            
+            // トレーニングデータを追加
             for (let i = 0; i < inputData.length; i++) {
+                // 各データポイントをモデルに追加
                 neuralNetwork.addData(inputData[i], outputData[i]);
             }
 
+            // データの前処理（正規化）
             neuralNetwork.normalizeData();
 
+            // トレーニングオプションを設定
             const trainingOptions = {
                 epochs: parseInt(epochsInput.value),
-                batchSize: parseInt(batchSizeInput.value)
+                batchSize: parseInt(batchSizeInput.value),
+                learningRate: 0.02
             };
 
+            console.log("Starting model training with options:", trainingOptions);
+            
+            // トレーニング開始
             neuralNetwork.train(trainingOptions, whileTraining, finishedTraining);
 
+            // トレーニング中の状態更新関数
             function whileTraining(epoch, loss) {
                 console.log(`Epoch: ${epoch}, Loss: ${loss.loss}`);
                 const progress = Math.round((epoch / trainingOptions.epochs) * 100);
@@ -699,15 +710,56 @@
                 modelInfoDiv.innerHTML = `エポック: ${epoch}/${trainingOptions.epochs}, 損失: ${loss.loss.toFixed(4)}`;
             }
 
+            // トレーニング完了時の関数
             function finishedTraining() {
+                console.log("Model training completed successfully!");
                 loadingIndicator.style.display = 'none';
                 showAlert(modelResultDiv, 'モデルのトレーニングが完了しました！', 'alert-success');
                 modelInfoDiv.innerHTML += '<br>モデルの構築が完了しました。テストデータを処理できます。';
                 processTestButton.disabled = false;
+                
+                // トレーニングデータの一部で検証
+                validateModel();
+            }
+            
+            // モデルの検証関数（オプショナル）
+            function validateModel() {
+                // トレーニングデータからランダムにサンプルを選ぶ
+                const validationSize = Math.min(5, processedTrainingData.length);
+                const indices = [];
+                for (let i = 0; i < validationSize; i++) {
+                    const randomIndex = Math.floor(Math.random() * processedTrainingData.length);
+                    indices.push(randomIndex);
+                }
+                
+                console.log("Validating model with random samples");
+                // 検証を実行
+                let completed = 0;
+                indices.forEach(idx => {
+                    const input = muscleChannels.map(ch => processedTrainingData[idx][ch]);
+                    const expected = angleColumns.map(col => processedTrainingData[idx][col]);
+                    
+                    neuralNetwork.predict(input, (error, results) => {
+                        if (error) {
+                            console.error("Validation prediction error:", error);
+                            return;
+                        }
+                        
+                        completed++;
+                        console.log(`Validation sample ${completed}/${validationSize}:`);
+                        console.log("Input:", input);
+                        console.log("Expected:", expected);
+                        console.log("Predicted:", results.map(r => r.value));
+                        
+                        if (completed === validationSize) {
+                            console.log("Validation complete");
+                        }
+                    });
+                });
             }
         }
 
-        // テストデータの処理
+        // テストデータの処理と予測
         function processTestData() {
             const file = testFileInput.files[0];
             if (!file) {
@@ -726,50 +778,44 @@
                 skipEmptyLines: true,
                 complete: function(results) {
                     if (results.errors.length > 0) {
-                        results.errors.forEach(error => {
-                            console.error('Parsing error:', error.code, error.message, error.row);
-                            if (error.code === "TooFewFields" || error.code === "TooManyFields") {
-                                showAlert(testResultDiv, `CSVファイルの解析中にエラーが発生しました。行${error.row + 1}のカラム数が不正です。期待されるカラム数: ${calibrationExpectedColumns}`, 'alert-danger');
-                            } else {
-                                showAlert(testResultDiv, 'CSVファイルの解析中にエラーが発生しました。', 'alert-danger');
-                            }
-                        });
+                        showAlert(testResultDiv, `CSVファイルの解析中にエラーが発生しました。: ${results.errors[0].message}`, 'alert-danger');
+                        console.error('Parsing errors:', results.errors);
                         return;
                     }
 
-                  let fileTestData = results.data;
+                    let fileTestData = results.data;
 
-                  // 必要なカラムが存在するか確認
-                  const requiredColumns = ["Timestamp", "Power", ...muscleChannels];
-                  const missingColumns = requiredColumns.filter(col => !(col in fileTestData[0]));
-                  if (missingColumns.length > 0) {
-                    showAlert(testResultDiv, `必要なカラムがありません: ${missingColumns.join(', ')}`, 'alert-warning');
-                    return;
-                  }
+                    // 必要なカラムが存在するか確認
+                    const requiredColumns = ["Timestamp", "Power", ...muscleChannels];
+                    const missingColumns = requiredColumns.filter(col => !(col in fileTestData[0]));
+                    if (missingColumns.length > 0) {
+                        showAlert(testResultDiv, `必要なカラムがありません: ${missingColumns.join(', ')}`, 'alert-warning');
+                        return;
+                    }
 
-                  //詳細なデータチェック
-                  const validData = fileTestData.filter((row, rowIndex) => {
-                    const isValidRow = requiredColumns.every(col => {
-                        if (row[col] === null || row[col] === undefined) {
-                            console.error(`Row ${rowIndex + 2}: Column '${col}' is missing.`);
-                            return false;
+                    // 詳細なデータチェック
+                    const validData = fileTestData.filter((row, rowIndex) => {
+                        const isValidRow = requiredColumns.every(col => {
+                            if (row[col] === null || row[col] === undefined) {
+                                console.error(`Row ${rowIndex + 2}: Column '${col}' is missing.`);
+                                return false;
+                            }
+                            if (col !== "Timestamp") {
+                                if(isNaN(row[col])){
+                                    console.error(`Row ${rowIndex + 2}: Column '${col}' is not a number.`);
+                                    return false;
+                                }
+                            }
+                            return true;
+                        });
+
+                        if (!isValidRow) {
+                            showAlert(testResultDiv, `CSVファイルの${rowIndex + 2}行目に不正なデータがあります。`, 'alert-warning');
                         }
-                        if (col !== "Timestamp") {
-                          if(isNaN(row[col])){
-                            console.error(`Row ${rowIndex + 2}: Column '${col}' is not a number.`);
-                            return false
-                          }
-                        }
-                        return true;
+                        return isValidRow;
                     });
 
-                    if (!isValidRow) {
-                        showAlert(testResultDiv, `CSVファイルの${rowIndex + 2}行目に不正なデータがあります。`, 'alert-warning');
-                    }
-                    return isValidRow;
-                  });
-
-                  testData = validData;
+                    testData = validData;
 
                     if (testData.length === 0) {
                         showAlert(testResultDiv, '有効なデータがありません。', 'alert-warning');
@@ -786,17 +832,21 @@
                     });
 
                     // モデルを使用して予測
-                    predictions = [];
+                    showAlert(testResultDiv, '予測を実行中...', 'alert-info');
+                    predictions = new Array(processedTestData.length);
                     let predictionsCompleted = 0;
 
+                    // 各フレームごとに予測を行う
                     processedTestData.forEach((row, index) => {
-                        const input = muscleChannels.map(ch => row[ch]);
+                        const input = muscleChannels.map(ch => parseFloat(row[ch]));
+                        
                         neuralNetwork.predict(input, (error, results) => {
                             if (error) {
                                 console.error('予測エラー:', error);
                                 return;
                             }
-
+                            
+                            // 予測結果を保存
                             predictions[index] = {
                                 elbow_angle: results[0].value,
                                 wrist_angle: results[1].value,
@@ -804,15 +854,27 @@
                             };
 
                             predictionsCompleted++;
-
+                            
+                            // すべての予測が完了したら処理
                             if (predictionsCompleted === processedTestData.length) {
+                                console.log("All predictions completed:", predictions.length);
                                 showAlert(testResultDiv, `${predictionsCompleted}フレームの腕の角度予測が完了しました。`, 'alert-success');
+                                
+                                // アニメーションの初期化
                                 initializeAnimation();
+                                visualizeData();
+                                
+                                // コントロールボタンの有効化
                                 playAnimationButton.disabled = false;
+                                pauseAnimationButton.disabled = true;
                                 resetAnimationButton.disabled = false;
                             }
                         });
                     });
+                },
+                error: function(error) {
+                    console.error("Error:", error);
+                    showAlert(testResultDiv, `CSVファイルの読み込み中にエラーが発生しました: ${error.message}`, 'alert-danger');
                 }
             });
         }
